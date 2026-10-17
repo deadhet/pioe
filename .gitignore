@@ -1,0 +1,24 @@
+# Simulation outputs
+*.vcd
+*.fst
+*.vvp
+sim_build/
+obj_dir/
+results.xml
+__pycache__/
+
+# Vivado / xsim
+*.jou
+*.log
+*.str
+*.wdb
+xsim.dir/
+.Xil/
+*.cache/
+*.hw/
+*.runs/
+*.sim/
+*.ip_user_files/
+
+# Hardening runs (LibreLane/OpenLane)
+runs/

@@ -1,0 +1,95 @@
+// UART RX — human-readable per-clock flowchart (matches src/uart_rx.v, uart_rx.md §R.10)
+// Render: dot -Tpng -Gdpi=150 uart_rx_flow.dot -o uart_rx_flow.png
+digraph uart_rx {
+    graph [rankdir=TB, fontname="DejaVu Sans", fontsize=20, labelloc=t, nodesep=0.45, ranksep=0.42,
+           label=<<b>UART Receiver (RX): what happens on every clock tick</b><br/><font point-size="13">Each time you come back to the top of a coloured box = one clock later. N = clocks per bit.</font><br/> >];
+    node  [fontname="DejaVu Sans", fontsize=12, style="filled,rounded", shape=box, fillcolor=white, penwidth=1.3];
+    edge  [fontname="DejaVu Sans", fontsize=11, penwidth=1.3];
+
+    reset [label="Power-on / reset\nall counters = 0, airlock = 1 (idle)", shape=oval, fillcolor="#e0e0e0"];
+
+    // ---- Front end (always running, every clock) ---------------------------
+    subgraph cluster_front {
+        label=<<b>Always on: the "airlock" (runs every clock, in parallel)</b>>; style="rounded,filled"; fillcolor="#f3f3f3"; color="#888888";
+        pin   [label="RX pin\n(asynchronous, can change any time)", shape=parallelogram, style=filled, fillcolor="#ffffff"];
+        ff    [label="FF1 → FF2 = rx_sync  (clean copy)\nFF3 = rx_prev  (rx_sync one clock ago)"];
+        fallw [label="fall = rx_prev is 1  AND  rx_sync is 0\n(\"the line just dropped\")", fillcolor="#fff7d6"];
+        pin -> ff -> fallw;
+    }
+
+    // ---- IDLE ---------------------------------------------------------------
+    subgraph cluster_idle {
+        label=<<b>IDLE — waiting for someone to talk</b>>; style="rounded,filled"; fillcolor="#e3f0ff"; color="#4a7fc1";
+        i_park [label="Keep counters at 0"];
+        i_q    [label="Did the line just\nfall 1 → 0?", shape=diamond, style=filled, fillcolor="#ffffff"];
+        i_park -> i_q;
+    }
+
+    // ---- START --------------------------------------------------------------
+    subgraph cluster_start {
+        label=<<b>START — is it a real start bit or just noise?</b>>; style="rounded,filled"; fillcolor="#fff0dc"; color="#d08a2c";
+        s_q    [label="Reached the MIDDLE of the start bit?\n(baud_cnt = N/2 − 1 − 2)\n−2 = airlock delay", shape=diamond, style=filled, fillcolor="#ffffff"];
+        s_inc  [label="baud_cnt + 1\n(wait one more clock)"];
+        s_low  [label="Is the line\nstill LOW?", shape=diamond, style=filled, fillcolor="#ffffff"];
+        s_ok   [label="Real start bit!\nbaud_cnt = 0\n(re-zero here: from now on\nevery N clocks = middle of a bit)", fillcolor="#e6f7e6"];
+        s_bad  [label="It was a glitch\n→ forget it", fillcolor="#fde2e2"];
+        s_q -> s_inc [label=" no"];
+        s_q -> s_low [label=" yes"];
+        s_low -> s_ok  [label=" yes"];
+        s_low -> s_bad [label=" no"];
+    }
+
+    // ---- DATA ---------------------------------------------------------------
+    subgraph cluster_data {
+        label=<<b>DATA — collect 8 bits, one every N clocks</b>>; style="rounded,filled"; fillcolor="#e9f7e9"; color="#3d9a4a";
+        d_q    [label="Full bit time passed?\n(baud_cnt = N − 1, \"tick\")", shape=diamond, style=filled, fillcolor="#ffffff"];
+        d_inc  [label="baud_cnt + 1\n(wait one more clock)"];
+        d_smp  [label="SAMPLE: read rx_sync\nslide it into the byte from the top\n(rx_reg = {rx_sync, rx_reg[7:1]})\nbaud_cnt = 0", fillcolor="#fff7d6"];
+        d_last [label="Was that the\n8th bit?\n(bit_cnt = 7)", shape=diamond, style=filled, fillcolor="#ffffff"];
+        d_next [label="bit_cnt + 1"];
+        d_done [label="bit_cnt = 0"];
+        d_q -> d_inc [label=" no"];
+        d_q -> d_smp [label=" yes"];
+        d_smp -> d_last;
+        d_last -> d_next [label=" no"];
+        d_last -> d_done [label=" yes"];
+    }
+
+    // ---- STOP ---------------------------------------------------------------
+    subgraph cluster_stop {
+        label=<<b>STOP — check the frame ended properly</b>>; style="rounded,filled"; fillcolor="#f2e8fb"; color="#8a55c0";
+        p_q    [label="Full bit time passed?\n(middle of the stop bit)", shape=diamond, style=filled, fillcolor="#ffffff"];
+        p_inc  [label="baud_cnt + 1\n(wait one more clock)"];
+        p_hi   [label="Is the line HIGH?\n(stop bit must be 1)", shape=diamond, style=filled, fillcolor="#ffffff"];
+        p_good [label="GOOD BYTE\nrx_data = rx_reg\nrx_valid = 1 for one clock", fillcolor="#e6f7e6"];
+        p_err  [label="BROKEN FRAME\nrx_frame_err = 1 for one clock\n(byte thrown away)", fillcolor="#fde2e2"];
+        p_q -> p_inc [label=" no"];
+        p_q -> p_hi  [label=" yes"];
+        p_hi -> p_good [label=" yes"];
+        p_hi -> p_err  [label=" no"];
+    }
+
+    // ---- Flow between states -----------------------------------------------
+    reset -> i_park;
+    i_q   -> i_park [label=" no (next clock)", constraint=false, color="#4a7fc1", fontcolor="#4a7fc1"];
+    i_q   -> s_q    [label=" yes → go to START", penwidth=2.2];
+    fallw -> i_q    [style=dashed, color="#b08900", label=" fall", fontcolor="#b08900", constraint=false];
+
+    s_inc -> s_q    [constraint=false, color="#d08a2c", label=" next clock", fontcolor="#d08a2c"];
+    s_ok  -> d_q    [label=" go to DATA", penwidth=2.2];
+    g1 [label="↑ back to IDLE", shape=oval, fillcolor="#e3f0ff", color="#4a7fc1"];
+    s_bad -> g1 [color="#c0392b"];
+
+    d_inc  -> d_q   [constraint=false, color="#3d9a4a", label=" next clock", fontcolor="#3d9a4a"];
+    d_next -> d_q   [constraint=false, color="#3d9a4a", label=" next bit", fontcolor="#3d9a4a"];
+    d_done -> p_q   [label=" go to STOP", penwidth=2.2];
+
+    p_inc  -> p_q    [constraint=false, color="#8a55c0", label=" next clock", fontcolor="#8a55c0"];
+    g2 [label="↑ back to IDLE\n(next frame)", shape=oval, fillcolor="#e3f0ff", color="#4a7fc1"];
+    g3 [label="↑ back to IDLE", shape=oval, fillcolor="#e3f0ff", color="#4a7fc1"];
+    p_good -> g2 [color="#3d9a4a"];
+    p_err  -> g3 [color="#c0392b"];
+
+    // keep the airlock box beside IDLE
+    { rank=same; reset; pin; }
+}

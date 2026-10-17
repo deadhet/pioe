@@ -1,0 +1,64 @@
+// UART TX — human-readable per-clock flowchart (matches src/uart_tx.v, uart_tx.md §T.5)
+// Render: dot -Tpng -Gdpi=150 uart_tx_flow.dot -o uart_tx_flow.png
+digraph uart_tx {
+    graph [rankdir=TB, fontname="DejaVu Sans", fontsize=20, labelloc=t, nodesep=0.45, ranksep=0.42,
+           label=<<b>UART Transmitter (TX): what happens on every clock tick</b><br/><font point-size="13">Each time you come back to the top of a coloured box = one clock later. N = clocks per bit. tick = (baud_cnt = N − 1).</font><br/> >];
+    node  [fontname="DejaVu Sans", fontsize=12, style="filled,rounded", shape=box, fillcolor=white, penwidth=1.3];
+    edge  [fontname="DejaVu Sans", fontsize=11, penwidth=1.3];
+
+    reset [label="Power-on / reset\ntx = 1 (line idle), counters = 0", shape=oval, fillcolor="#e0e0e0"];
+
+    subgraph cluster_idle {
+        label=<<b>IDLE — line high, waiting for a byte</b>>; style="rounded,filled"; fillcolor="#e3f0ff"; color="#4a7fc1";
+        i_park [label="tx = 1\nkeep counters at 0"];
+        i_q    [label="tx_start = 1?\n(\"please send\")", shape=diamond, style=filled, fillcolor="#ffffff"];
+        i_go   [label="Copy byte: tx_reg = tx_data\ntx = 0  (start bit begins NOW)", fillcolor="#fff7d6"];
+        i_park -> i_q;
+        i_q -> i_go [label=" yes"];
+    }
+
+    subgraph cluster_start {
+        label=<<b>START — hold the line LOW for one bit time</b>>; style="rounded,filled"; fillcolor="#fff0dc"; color="#d08a2c";
+        s_q   [label="tick?\n(N clocks passed)", shape=diamond, style=filled, fillcolor="#ffffff"];
+        s_inc [label="baud_cnt + 1\n(wait one more clock)"];
+        s_go  [label="baud_cnt = 0\ntx = tx_reg[0]  (bit 0 goes out)", fillcolor="#fff7d6"];
+        s_q -> s_inc [label=" no"];
+        s_q -> s_go  [label=" yes"];
+    }
+
+    subgraph cluster_data {
+        label=<<b>DATA — put out 8 bits, LSB first, one every N clocks</b>>; style="rounded,filled"; fillcolor="#e9f7e9"; color="#3d9a4a";
+        d_q    [label="tick?\n(N clocks passed)", shape=diamond, style=filled, fillcolor="#ffffff"];
+        d_inc  [label="baud_cnt + 1\n(wait one more clock)"];
+        d_z    [label="baud_cnt = 0"];
+        d_last [label="Was that the\n8th bit?\n(bit_cnt = 7)", shape=diamond, style=filled, fillcolor="#ffffff"];
+        d_next [label="bit_cnt + 1\ntx = next bit  (tx_reg[bit_cnt+1])", fillcolor="#fff7d6"];
+        d_done [label="bit_cnt = 0\ntx = 1  (stop bit begins)", fillcolor="#fff7d6"];
+        d_q -> d_inc [label=" no"];
+        d_q -> d_z   [label=" yes"];
+        d_z -> d_last;
+        d_last -> d_next [label=" no"];
+        d_last -> d_done [label=" yes"];
+    }
+
+    subgraph cluster_stop {
+        label=<<b>STOP — hold the line HIGH for one bit time</b>>; style="rounded,filled"; fillcolor="#f2e8fb"; color="#8a55c0";
+        p_q   [label="tick?\n(N clocks passed)", shape=diamond, style=filled, fillcolor="#ffffff"];
+        p_inc [label="baud_cnt + 1\n(wait one more clock)"];
+        p_go  [label="baud_cnt = 0\ntx_done = 1 for one clock", fillcolor="#e6f7e6"];
+        p_q -> p_inc [label=" no"];
+        p_q -> p_go  [label=" yes"];
+    }
+
+    reset -> i_park;
+    i_q   -> i_park [label=" no (next clock)", constraint=false, color="#4a7fc1", fontcolor="#4a7fc1"];
+    i_go  -> s_q    [label=" go to START", penwidth=2.2];
+    s_inc -> s_q    [constraint=false, color="#d08a2c", label=" next clock", fontcolor="#d08a2c"];
+    s_go  -> d_q    [label=" go to DATA", penwidth=2.2];
+    d_inc -> d_q    [constraint=false, color="#3d9a4a", label=" next clock", fontcolor="#3d9a4a"];
+    d_next -> d_q   [constraint=false, color="#3d9a4a", label=" next bit", fontcolor="#3d9a4a"];
+    d_done -> p_q   [label=" go to STOP", penwidth=2.2];
+    p_inc -> p_q    [constraint=false, color="#8a55c0", label=" next clock", fontcolor="#8a55c0"];
+    g1 [label="↑ back to IDLE\nframe took exactly 10 × N clocks", shape=oval, fillcolor="#e3f0ff", color="#4a7fc1"];
+    p_go  -> g1 [color="#3d9a4a"];
+}
