@@ -22,3 +22,7 @@ A small, firmware-programmable chip that converts between **UART, SPI and I2C** 
 - [ ] Synthesis, area check, RTL→GDS hardening
 - [ ] FPGA bring-up
 - [ ] Tiny Tapeout submission
+
+## License
+
+Copyright 2026 Het Patel. Licensed under the [Apache License 2.0](LICENSE).
